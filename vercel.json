@@ -2,29 +2,22 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/bot.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/cron.js",
+      "src": "api/**/*.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/webhook",
-      "dest": "/api/bot.js",
-      "methods": ["GET", "POST"]
+      "dest": "/api/bot.js"
     },
     {
       "src": "/cron",
-      "dest": "/api/cron.js",
-      "methods": ["POST"]
+      "dest": "/api/cron.js"
     },
     {
-      "src": "/api/test",
-      "dest": "/api/test.js",
-      "methods": ["GET"]
+      "src": "/test",
+      "dest": "/api/test.js"
     }
   ]
 }
