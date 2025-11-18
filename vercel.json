@@ -22,9 +22,9 @@
       "methods": ["POST"]
     },
     {
-  "src": "/api/test.js",
-  "dest": "/api/test.js",
-  "methods": ["GET"]
-}
+      "src": "/api/test",
+      "dest": "/api/test.js",
+      "methods": ["GET"]
+    }
   ]
 }
