@@ -1,7 +1,6 @@
-const airtableService = require('../lib/airtable');
+const AirtableService = require('../lib/airtable');
 
 module.exports = async (req, res) => {
-  // Добавляем CORS headers для браузера
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -11,25 +10,31 @@ module.exports = async (req, res) => {
   }
 
   try {
-    console.log('Starting Airtable connection test...');
+    console.log('=== STARTING AIRTABLE DIAGNOSTICS ===');
     
-    // Тест подключения к Airtable
-    const connectionTest = await airtableService.testConnection();
+    // Тест подключения
+    const connectionTest = await AirtableService.testConnection();
     
     // Тест получения сообщения
-    const testMessage = await airtableService.getMessageForDay(1);
+    let testMessage;
+    try {
+      testMessage = await AirtableService.getMessageForDay(1);
+    } catch (messageError) {
+      console.log('Message test error:', messageError.message);
+      testMessage = null;
+    }
     
     // Тест создания пользователя
     let testUser;
     try {
-      testUser = await airtableService.createOrUpdateUser(
+      testUser = await AirtableService.createOrUpdateUser(
         123456789, 
         new Date().toISOString().split('T')[0], 
         1, 
         'UTC'
       );
     } catch (userError) {
-      console.log('User creation test failed:', userError.message);
+      console.log('User creation test error:', userError.message);
       testUser = null;
     }
 
@@ -44,20 +49,24 @@ module.exports = async (req, res) => {
       environment: {
         hasAirtableToken: !!process.env.AIRTABLE_TOKEN,
         hasAirtableBaseId: !!process.env.AIRTABLE_BASE_ID,
-        airtableBaseId: process.env.AIRTABLE_BASE_ID ? 'Set' : 'Not set'
+        airtableBaseId: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID : 'Not set',
+        tokenPreview: process.env.AIRTABLE_TOKEN ? 
+          process.env.AIRTABLE_TOKEN.substring(0, 10) + '...' : 'Not set'
       }
     };
 
-    console.log('Test result:', result);
+    console.log('=== DIAGNOSTICS RESULT ===', JSON.stringify(result, null, 2));
+    
     res.status(200).json(result);
   } catch (error) {
-    console.error('Test error:', error);
+    console.error('=== DIAGNOSTICS ERROR ===', error);
     res.status(500).json({
       error: error.message,
-      stack: error.stack,
+      stack: process.env.NODE_ENV === 'production' ? 'Hidden' : error.stack,
       environment: {
         hasAirtableToken: !!process.env.AIRTABLE_TOKEN,
-        hasAirtableBaseId: !!process.env.AIRTABLE_BASE_ID
+        hasAirtableBaseId: !!process.env.AIRTABLE_BASE_ID,
+        airtableBaseId: process.env.AIRTABLE_BASE_ID || 'Not set'
       }
     });
   }
