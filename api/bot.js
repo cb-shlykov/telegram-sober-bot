@@ -1,8 +1,90 @@
 const { Telegraf } = require('telegraf');
-const airtableService = require('../lib/airtable');
+const Airtable = require('airtable');
+
+// Инициализация Airtable
+const base = new Airtable({
+  apiKey: process.env.AIRTABLE_TOKEN
+}).base(process.env.AIRTABLE_BASE_ID);
 
 // Создаем экземпляр бота
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+
+// Функции для работы с Airtable
+const airtableService = {
+  // Получить пользователя по Telegram ID
+  async getUserByTelegramId(telegramId) {
+    try {
+      const records = await base('Users').select({
+        filterByFormula: `{TelegramID} = ${telegramId}`,
+        maxRecords: 1
+      }).firstPage();
+
+      return records.length > 0 ? {
+        id: records[0].id,
+        ...records[0].fields
+      } : null;
+    } catch (error) {
+      console.error('Error getting user:', error);
+      return null;
+    }
+  },
+
+  // Создать или обновить пользователя
+  async createOrUpdateUser(telegramId, startDate, daysCount, timezone = 'UTC') {
+    try {
+      const existingUser = await this.getUserByTelegramId(telegramId);
+      
+      const userData = {
+        TelegramID: Number(telegramId),
+        StartDate: startDate,
+        DaysCount: Number(daysCount),
+        Timezone: timezone
+      };
+
+      if (existingUser) {
+        // Обновляем существующего пользователя
+        const record = await base('Users').update(existingUser.id, userData);
+        return record;
+      } else {
+        // Создаем нового пользователя
+        const records = await base('Users').create([
+          { fields: userData }
+        ]);
+        return records[0];
+      }
+    } catch (error) {
+      console.error('Error creating/updating user:', error);
+      throw error;
+    }
+  },
+
+  // Удалить пользователя
+  async deleteUser(recordId) {
+    try {
+      await base('Users').destroy(recordId);
+      console.log(`User ${recordId} deleted successfully`);
+      return true;
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      throw error;
+    }
+  },
+
+  // Получить сообщение для определенного дня
+  async getMessageForDay(day) {
+    try {
+      const records = await base('Messages').select({
+        filterByFormula: `{Day} = ${day}`,
+        maxRecords: 1
+      }).firstPage();
+
+      return records.length > 0 ? records[0].get('Message') : null;
+    } catch (error) {
+      console.error('Error getting message:', error);
+      return null;
+    }
+  }
+};
 
 // Главное меню с кнопкой сброса
 async function showMainMenu(ctx, text) {
@@ -37,40 +119,7 @@ bot.start(async (ctx) => {
 
 // Обработчик команды /reset
 bot.command('reset', async (ctx) => {
-  const userId = ctx.from.id;
-  
-  try {
-    // Удаляем пользователя из базы данных
-    const existingUser = await airtableService.getUserByTelegramId(userId);
-    
-    if (existingUser) {
-      await airtableService.deleteUser(existingUser.id);
-      await ctx.reply('🔄 Счетчик сброшен! Теперь вы можете начать заново.');
-      
-      // Показываем стартовое меню
-      await ctx.reply('🎯 Выберите, когда вы отказались от алкоголя:', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🗓️ Сегодня первый день', callback_data: 'start_today' }],
-            [{ text: '📅 Указать количество дней', callback_data: 'input_days' }]
-          ]
-        }
-      });
-    } else {
-      await ctx.reply('У вас еще нет активного счетчика. Давайте начнем!');
-      await ctx.reply('🎯 Выберите, когда вы отказались от алкоголя:', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🗓️ Сегодня первый день', callback_data: 'start_today' }],
-            [{ text: '📅 Указать количество дней', callback_data: 'input_days' }]
-          ]
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Error resetting counter:', error);
-    await ctx.reply('❌ Произошла ошибка при сбросе счетчика. Попробуйте еще раз.');
-  }
+  await handleReset(ctx);
 });
 
 // Обработчик callback запросов (кнопки)
@@ -111,6 +160,36 @@ bot.on('callback_query', async (ctx) => {
   }
 });
 
+// Функция сброса счетчика
+async function handleReset(ctx) {
+  const userId = ctx.from.id;
+  
+  try {
+    // Удаляем пользователя из базы данных
+    const existingUser = await airtableService.getUserByTelegramId(userId);
+    
+    if (existingUser) {
+      await airtableService.deleteUser(existingUser.id);
+      await ctx.reply('🔄 Счетчик сброшен! Теперь вы можете начать заново.');
+    } else {
+      await ctx.reply('У вас еще нет активного счетчика.');
+    }
+    
+    // Показываем стартовое меню
+    await ctx.reply('🎯 Выберите, когда вы отказались от алкоголя:', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🗓️ Сегодня первый день', callback_data: 'start_today' }],
+          [{ text: '📅 Указать количество дней', callback_data: 'input_days' }]
+        ]
+      }
+    });
+  } catch (error) {
+    console.error('Error resetting counter:', error);
+    await ctx.reply('❌ Произошла ошибка при сбросе счетчика. Попробуйте еще раз.');
+  }
+}
+
 // Обработчик текстовых сообщений
 bot.on('text', async (ctx) => {
   const text = ctx.message.text;
@@ -118,38 +197,7 @@ bot.on('text', async (ctx) => {
 
   // Обработка кнопки сброса
   if (text === '🔄 Сбросить счетчик') {
-    try {
-      // Удаляем пользователя из базы данных
-      const existingUser = await airtableService.getUserByTelegramId(userId);
-      
-      if (existingUser) {
-        await airtableService.deleteUser(existingUser.id);
-        await ctx.reply('🔄 Счетчик сброшен! Теперь вы можете начать заново.');
-        
-        // Показываем стартовое меню
-        await ctx.reply('🎯 Выберите, когда вы отказались от алкоголя:', {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🗓️ Сегодня первый день', callback_data: 'start_today' }],
-              [{ text: '📅 Указать количество дней', callback_data: 'input_days' }]
-            ]
-          }
-        });
-      } else {
-        await ctx.reply('У вас еще нет активного счетчика. Давайте начнем!');
-        await ctx.reply('🎯 Выберите, когда вы отказались от алкоголя:', {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🗓️ Сегодня первый день', callback_data: 'start_today' }],
-              [{ text: '📅 Указать количество дней', callback_data: 'input_days' }]
-            ]
-          }
-        });
-      }
-    } catch (error) {
-      console.error('Error resetting counter:', error);
-      await ctx.reply('❌ Произошла ошибка при сбросе счетчика. Попробуйте еще раз.');
-    }
+    await handleReset(ctx);
     return;
   }
 
@@ -194,6 +242,7 @@ bot.on('text', async (ctx) => {
 
     } catch (error) {
       console.error('Error saving user days:', error);
+      console.error('Error details:', error.message);
       await ctx.reply('❌ Произошла ошибка при сохранении данных. Попробуйте еще раз.');
     }
   } else {
